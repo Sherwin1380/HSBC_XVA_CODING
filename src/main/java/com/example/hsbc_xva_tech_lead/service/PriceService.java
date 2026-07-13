@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -20,9 +22,9 @@ public class PriceService {
         {
             TimedPrice currentTimedPrice = priceList.get(request.instrumentId);
 
-            currentTimedPrice.updateList.put(request.timestamp, request.price);
+            indexPrice(currentTimedPrice, request.timestamp, request.price);
 
-            if(currentTimedPrice.currentPriceTimeStamp < request.timestamp)
+            if(currentTimedPrice.currentPriceTimeStamp <= request.timestamp)
             {
                 currentTimedPrice.currentPrice = request.price;
                 currentTimedPrice.currentPriceTimeStamp = request.timestamp;
@@ -34,7 +36,7 @@ public class PriceService {
             TimedPrice timePrice = new TimedPrice();
             timePrice.currentPrice = request.price;
             timePrice.currentPriceTimeStamp = request.timestamp;
-            timePrice.updateList.put(request.timestamp, request.price);
+            indexPrice(timePrice, request.timestamp, request.price);
 
             priceList.put(request.instrumentId, timePrice);
         }
@@ -59,12 +61,11 @@ public class PriceService {
     {
         if(priceList.containsKey(instrumentId))
         {
-            Map.Entry<Integer, BigDecimal> maxEntry = priceList.get(instrumentId).updateList.entrySet()
-                    .stream()
-                    .max(Map.Entry.comparingByValue())
-                    .orElseThrow();
+            TreeMap<BigDecimal, TreeSet<Integer>> priceIndex = (TreeMap<BigDecimal, TreeSet<Integer>>) priceList.get(instrumentId).priceIndex;
 
-            return new Price(instrumentId, maxEntry.getValue(), maxEntry.getKey());
+            Map.Entry<BigDecimal, TreeSet<Integer>> highest = priceIndex.lastEntry();
+
+            return new Price(instrumentId, highest.getKey(), highest.getValue().first());
         }
         return new Price(instrumentId, BigDecimal.ZERO , 0);
     }
@@ -73,13 +74,30 @@ public class PriceService {
     {
         if(priceList.containsKey(instrumentId))
         {
-            Map.Entry<Integer, BigDecimal> minEntry = priceList.get(instrumentId).updateList.entrySet()
-                    .stream()
-                    .min(Map.Entry.comparingByValue())
-                    .orElseThrow();
+            TreeMap<BigDecimal, TreeSet<Integer>> priceIndex = (TreeMap<BigDecimal, TreeSet<Integer>>) priceList.get(instrumentId).priceIndex;
 
-            return new Price(instrumentId, minEntry.getValue(), minEntry.getKey());
+            Map.Entry<BigDecimal, TreeSet<Integer>> lowest = priceIndex.firstEntry();
+
+            return new Price(instrumentId, lowest.getKey(), lowest.getValue().first());
         }
         return new Price(instrumentId, BigDecimal.ZERO , 0);
+    }
+
+    private void indexPrice(TimedPrice timedPrice, int timestamp, BigDecimal price)
+    {
+        BigDecimal previousPrice = timedPrice.updateList.get(timestamp);
+
+        if(previousPrice != null)
+        {
+            TreeSet<Integer> timestamps = (TreeSet<Integer>) timedPrice.priceIndex.get(previousPrice);
+            timestamps.remove(timestamp);
+            if(timestamps.isEmpty())
+            {
+                timedPrice.priceIndex.remove(previousPrice);
+            }
+        }
+
+        timedPrice.updateList.put(timestamp, price);
+        timedPrice.priceIndex.computeIfAbsent(price, key -> new TreeSet<>()).add(timestamp);
     }
 }
